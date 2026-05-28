@@ -9,6 +9,8 @@ import java.util.Scanner;
 import com.beust.jcommander.JCommander;
 
 import lombok.extern.slf4j.Slf4j;
+import fucci.IsolationLevel;
+import fucci.Randomly;
 import fucci.common.Table;
 import fucci.reducer.TestCase;
 
@@ -158,9 +160,10 @@ public class Main {
                     }
                     // 恢复原始table
                     TableTool.recoverOriginalTable();
-                    // 生成两个事务
-                    tx1 = table.genTransaction(1);
-                    tx2 = table.genTransaction(2);
+                    // 生成两个事务，确保同一隔离级别
+                    IsolationLevel isolationLevel = Randomly.fromList(TableTool.possibleIsolationLevels);
+                    tx1 = table.genTransaction(1, isolationLevel);
+                    tx2 = table.genTransaction(2, isolationLevel);
                     testCase.tx1 = tx1;
                     testCase.tx2 = tx2;
                     TableTool.recoverOriginalTable();

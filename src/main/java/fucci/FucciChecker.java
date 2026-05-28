@@ -4,6 +4,9 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.sql.SQLException;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -20,6 +23,9 @@ import fucci.reducer.TestCase;
 
 @Slf4j
 public class FucciChecker {
+
+    private static final DateTimeFormatter BUG_RECORD_TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss XXX '['VV']'");
 
     protected Transaction tx1;
     protected Transaction tx2;
@@ -103,6 +109,8 @@ public class FucciChecker {
             testCase.submittedOrder = submittedOrder;
             boolean res = oracleCheck(submittedOrder);
             if (!res && TableTool.reducerSwitchOn) {
+                String bugReason = bugInfo;
+                String bugRecordTime = getBugRecordTime();
                 log.info("---------------------------Find a bug, start reducer ---------------------------");
                 String reducedCase = "";
                 String reducedCaseOfAllRandom = "";
@@ -136,24 +144,36 @@ public class FucciChecker {
                         TableTool.reducerType.equals("epsilon-greedy")) {
                     // 输出原始bug case
                     saveTestCase(testCase.toString(),
-                            TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound + "_origin.txt");
+                            TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound + "_origin.txt",
+                            bugReason,
+                            bugRecordTime);
                     // 输出简化后的bug case
                     saveTestCase(reducedCase,
                             TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound + "_"
-                                    + TableTool.reducerType + "_reduced.txt");
+                                    + TableTool.reducerType + "_reduced.txt",
+                            bugReason,
+                            bugRecordTime);
                 } else if (TableTool.reducerType.equals("all")) {
                     // 输出原始bug case
                     saveTestCase(testCase.toString(),
-                            TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound + "_origin.txt");
+                            TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound + "_origin.txt",
+                            bugReason,
+                            bugRecordTime);
                     // 分别输出简化后的bug case
                     saveTestCase(reducedCaseOfAllRandom,
-                            TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound + "_random_reduced.txt");
+                            TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound + "_random_reduced.txt",
+                            bugReason,
+                            bugRecordTime);
                     saveTestCase(reducedCaseOfAllProb,
                             TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound
-                                    + "_probability-table_reduced.txt");
+                                    + "_probability-table_reduced.txt",
+                            bugReason,
+                            bugRecordTime);
                     saveTestCase(reducedCaseOfAllEpsilon,
                             TableTool.bugPath + File.separator + "bug_" + TableTool.bugFound
-                                    + "_epsilon-greedy_reduced.txt");
+                                    + "_epsilon-greedy_reduced.txt",
+                            bugReason,
+                            bugRecordTime);
                 }
                 TableTool.bugFound++;
             }
@@ -177,13 +197,38 @@ public class FucciChecker {
     }
 
     public static void saveTestCase(String testCase, String filename) {
+        saveTestCase(testCase, filename, null);
+    }
+
+    public static void saveTestCase(String testCase, String filename, String bugInfo) {
+        saveTestCase(testCase, filename, bugInfo, getBugRecordTime());
+    }
+
+    public static void saveTestCase(String testCase, String filename, String bugInfo, String bugRecordTime) {
         try {
             FileWriter writer = new FileWriter(filename);
             writer.write(testCase);
+            if (!testCase.endsWith("\n")) {
+                writer.write("\n");
+            }
+            if (bugInfo != null && !bugInfo.trim().isEmpty()) {
+                writer.write("\nBUG INFO\n");
+                writer.write(bugInfo.trim());
+                writer.write("\n");
+            }
+            if (bugRecordTime != null && !bugRecordTime.trim().isEmpty()) {
+                writer.write("\nBUG RECORD TIME\n");
+                writer.write(bugRecordTime.trim());
+                writer.write("\n");
+            }
             writer.close();
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private static String getBugRecordTime() {
+        return ZonedDateTime.now(ZoneId.systemDefault()).format(BUG_RECORD_TIME_FORMATTER);
     }
 
     public void checkAll() {
@@ -293,7 +338,11 @@ public class FucciChecker {
                 log.info("DT oracle order: " + execResult2.getOrder());
                 log.info("DT oracle result: " + execResult2);
             }
-            return compareOracles(execResult1, execResult2);
+            boolean res = compareOracles(execResult1, execResult2);
+            if (!res) {
+                logBugReport(schedule, execResult1, execResult2);
+            }
+            return res;
         }
         if (compareOracles(execResult1, execResult2)) {
             // false代表有bug
@@ -304,11 +353,7 @@ public class FucciChecker {
             log.info("DT oracle result: " + execResult2);
             return true;
         }
-        TableTool.bugReport.setInputSchedule(getScheduleInputStr(schedule));
-        TableTool.bugReport.setSubmittedOrder(schedule.toString());
-        TableTool.bugReport.setExecRes(execResult1);
-        TableTool.bugReport.setInferredRes(execResult2);
-        log.info(TableTool.bugReport.toString());
+        logBugReport(schedule, execResult1, execResult2);
         return false;
     }
 
@@ -368,7 +413,11 @@ public class FucciChecker {
                 log.info("MVCC-based oracle order: " + mvccResult.getOrder());
                 log.info("MVCC-based oracle result: " + mvccResult);
             }
-            return compareOracles(execResult, mvccResult);
+            boolean res = compareOracles(execResult, mvccResult);
+            if (!res) {
+                logBugReport(schedule, execResult, mvccResult);
+            }
+            return res;
         }
         if (compareOracles(execResult, mvccResult)) {
             // false代表有bug
@@ -379,12 +428,18 @@ public class FucciChecker {
             log.info("MVCC-based oracle result: " + mvccResult);
             return true;
         }
+        logBugReport(schedule, execResult, mvccResult);
+        return false;
+    }
+
+    private void logBugReport(ArrayList<StatementCell> schedule, TxnPairResult execResult, TxnPairResult inferredResult) {
+        TableTool.bugReport.setBugFound(true);
         TableTool.bugReport.setInputSchedule(getScheduleInputStr(schedule));
         TableTool.bugReport.setSubmittedOrder(schedule.toString());
+        TableTool.bugReport.setBugInfo(bugInfo);
         TableTool.bugReport.setExecRes(execResult);
-        TableTool.bugReport.setInferredRes(mvccResult);
+        TableTool.bugReport.setInferredRes(inferredResult);
         log.info(TableTool.bugReport.toString());
-        return false;
     }
 
     public boolean oracleCheck(ArrayList<StatementCell> schedule) {

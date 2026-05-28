@@ -14,14 +14,18 @@ public class BugReport {
     private Transaction tx1, tx2;
     private String inputSchedule;
     private String submittedOrder;
+    private String bugInfo;
     private TxnPairResult execRes;
     private TxnPairResult inferredRes;
 
     public String toString() {
         StringBuilder sb = new StringBuilder("=============================");
         sb.append("BUG REPORT\n")
-                .append(" -- Oracle: ").append(TableTool.oracle).append("\n")
-                .append(createTableSQL).append("\n");
+                .append(" -- Oracle: ").append(TableTool.oracle).append("\n");
+        if (bugInfo != null && !bugInfo.isEmpty()) {
+            sb.append(" -- Bug Info: ").append(bugInfo).append("\n");
+        }
+        sb.append(createTableSQL).append("\n");
         for (String stmt : initializeStatements) {
             sb.append(stmt).append(";\n");
         }
